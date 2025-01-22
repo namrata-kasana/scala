@@ -1,0 +1,46 @@
+import org.apache.spark.sql.SparkSession
+import java.io.ByteArrayInputStream
+import java.util.zip.ZipInputStream
+import scala.io.Source
+
+object ZipFileReader {
+  def main(args: Array[String]): Unit = {
+    val spark = SparkSession.builder()
+      .appName("Read ZIP Files")
+      .master("local[*]")
+      .getOrCreate()
+
+    val zipFilePath = "path/to/your/file.zip"
+
+    // Read the ZIP file as binary files
+    val binaryFilesRDD = spark.sparkContext.binaryFiles(zipFilePath)
+
+    // Process each binary file (ZIP file)
+    val extractedData = binaryFilesRDD.flatMap { case (fileName, content) =>
+      val zipStream = new ZipInputStream(new ByteArrayInputStream(content.toArray()))
+      val result = scala.collection.mutable.ListBuffer[String]()
+
+      var entry = zipStream.getNextEntry
+      while (entry != null) {
+        if (!entry.isDirectory && entry.getName.endsWith(".csv")) {
+          val csvContent = Source.fromInputStream(zipStream).getLines().mkString("\n")
+          result += csvContent // Add CSV content to the result
+        }
+        entry = zipStream.getNextEntry
+      }
+      zipStream.close()
+      result
+    }
+
+    // Convert extracted CSV data to DataFrame
+    import spark.implicits._
+    val csvDF = extractedData.toDS().flatMap(_.split("\n")).map { line =>
+      line.split(",") // Split each line by commas (basic CSV parsing)
+    }.toDF("Column1", "Column2", "Column3") // Adjust column names as needed
+
+    // Show the DataFrame
+    csvDF.show()
+
+    spark.stop()
+  }
+}
